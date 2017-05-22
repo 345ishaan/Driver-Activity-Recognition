@@ -9,6 +9,17 @@ from tqdm import tqdm
 fourcc = cv2.VideoWriter_fourcc(*'MP4V')
 out = cv2.VideoWriter('subject'+'.mp4',fourcc, 5.0, (640,480), True)
 
+
+# c0: safe driving
+# c1: texting - right
+# c2: talking on the phone - right
+# c3: texting - left
+# c4: talking on the phone - left
+# c5: operating the radio
+# c6: drinking
+# c7: reaching behind
+# c8: hair and makeup
+# c9: talking to passenger
 N_CLASSES = 10
 N_SUBJECTS = 26
 TRAIN_PATH = '../state_farm_data/imgs/train/'
@@ -56,6 +67,22 @@ def make_tfrecord(data_frame):
 	print "Written {} Images".format(num_iterations)
 	writer.close()
 
+def extract_tfrecord():
+	record_iterator = tf.python_io.tf_record_iterator(path=tfrecords_filename)
+	save_data = None
+	save_euler = []
+	for string_record in record_iterator:
+		example = tf.train.Example()
+		example.ParseFromString(string_record)
+
+		img_string = example.features.feature['image_raw'].bytes_list.value[0]
+		img_width = int(example.features.feature['width'].int64_list.value[0])
+		img_height = int(example.features.feature['height'].int64_list.value[0])
+		labels = int(example.features.feature['class'].int64_list.value[0])
+		img = np.fromstring(img_string, dtype=np.uint8).reshape(img_height,img_width,3)
+		
+
+
 def visualise(df):
 	for i in range(df.shape[0]):
 		if df[i,0] == 'p012' and df[i,1] == 'c8': 
@@ -74,6 +101,7 @@ if __name__ == '__main__':
 		visualise(df)
 	if GENERATE_DATA:
 		make_tfrecord(df)
+		
 
 	
 
