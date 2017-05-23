@@ -4,6 +4,7 @@ import argparse
 import tensorflow as tf
 from model import *
 
+
 def parse_args():
 	parser = argparse.ArgumentParser()
 	parser.add_argument('-m','--mode',dest='forward_only',help='Test or Train Mode',default=0,type=int)
@@ -16,12 +17,19 @@ def parse_args():
 if __name__ == '__main__':
 
 	args = parse_args()
+	
+	if not os.path.exists('../logs'):
+		os.makedirs('../logs')
+	map(os.unlink,(os.path.join( '../logs',f) for f in os.listdir('../logs')) )
 
 	with tf.Session() as sess:
 		net = Model(sess,args.batch_size,args.num_epochs,args.tf_record_file_path)
 		net.build_network()
 		if not args.forward_only:
-			net.fit()
+			#net.fit()
+			net.print_variables()
+			net.write_tensorboard()
+			print "Here"
 		else:
 			net.predict()
 
