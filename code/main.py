@@ -26,10 +26,7 @@ if __name__ == '__main__':
 		net = Model(sess,args.batch_size,args.num_epochs,args.tf_record_file_path)
 		net.build_network()
 		if not args.forward_only:
-			#net.fit()
-			net.print_variables()
-			net.write_tensorboard()
-			print "Here"
+			net.fit()
 		else:
 			net.predict()
 

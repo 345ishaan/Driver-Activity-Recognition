@@ -15,6 +15,8 @@ class Model(object):
 		self.img_width = 640
 		self.channels = 3
 
+		self.num_classes = 10
+
 		self.tf_record_file_path = tf_record_file_path
 		self.filename_queue = tf.train.string_input_producer([self.tf_record_file_path], num_epochs=self.num_epochs)
 		self.images, self.labels = self.load_from_tfRecord(self.filename_queue)
@@ -27,8 +29,14 @@ class Model(object):
 		self.Y = tf.placeholder(tf.int32,shape=(self.batch_size),name='labels')
 
 		with slim.arg_scope(resnet_v1.resnet_arg_scope(is_training=True)):
-			self.net, self.end_points = resnet_v1.resnet_v1_50(self.X, 20)
-		return self.net
+			self.net, self.end_points = resnet_v1.resnet_v1_50(self.X)
+		
+		self.fc_classification = slim.fully_connected(self.net,512,scope='fc_classification')
+		self.out_classification = slim.fully_connected(self.fc_classification,self.num_classes,scope='out_classification')
+		self.cross_entropy_loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(
+			labels=tf.one_hot(self.Y,self.num_classes),
+			logits=self.out_classification))
+		return self.cross_entropy_loss
 
 	def write_tensorboard(self):
 
@@ -43,16 +51,27 @@ class Model(object):
 		print "Training Model"
 		
 		optimizer = tf.train.AdamOptimizer()
-		minimize_loss = optimizer.minimize(tf.losses.softmax_cross_entropy(tf.one_hot(self.Y),tf.squeeze(self.net)))
+		minimize_loss = optimizer.minimize(self.cross_entropy_loss)
 		
 		self.sess.run(tf.group(tf.global_variables_initializer(),tf.local_variables_initializer()))
 		
+
+		tf.contrib.framework.assign_from_checkpoint_fn('../weights/resnet_v1_50.ckpt',slim.get_model_variables('resnet_v1_50'))(self.sess)
+		
 		coord = tf.train.Coordinator()
 		threads = tf.train.start_queue_runners(sess=self.sess,coord=coord)
+
+		counter = 1
 		try:
 			while not coord.should_stop():
 				batch_imgs,batch_labels = self.sess.run([self.images,self.labels])
+				batch_imgs = (batch_imgs - 127.5) / 128.0
+				output_feed=[minimize_loss,self.cross_entropy_loss]
+				input_feed={self.X:batch_imgs,self.Y:batch_labels}
+				op = self.sess.run(output_feed,input_feed)
 				
+				print "Iteration:{},Loss:{}".format(counter,op[1])
+				counter += 1
 		except tf.errors.OutOfRangeError:
 			print('Done training -- epoch limit reached')
 		finally:
@@ -91,7 +110,7 @@ class Model(object):
 
 	def print_variables(self):
 
-		params = slim.get_model_variables()
-
+		params = slim.get_model_variables()#tf.all_variables()
 		for param in params:
 			print '{} {}'.format(param.name,param.get_shape())
+			
