@@ -22,11 +22,11 @@ out = cv2.VideoWriter('subject'+'.mp4',fourcc, 5.0, (640,480), True)
 # c9: talking to passenger
 N_CLASSES = 10
 N_SUBJECTS = 26
-TRAIN_PATH = '../state_farm_data/imgs/train/'
+TRAIN_PATH = '/home/ishan_shashank/state_farm/data/imgs/train/'
 VISUALISE = False
 GENERATE_DATA = True
 
-tfrecords_filename = 'statefarm.tfrecords'
+tfrecords_filename = './statefarm.tfrecords'
 writer = tf.python_io.TFRecordWriter(tfrecords_filename)
 
 
@@ -95,7 +95,7 @@ def visualise(df):
 
 
 if __name__ == '__main__':
-	df = pd.read_csv('../state_farm_data/driver_imgs_list.csv')
+	df = pd.read_csv('/home/ishan_shashank/state_farm/data/driver_imgs_list.csv')
 	df = np.asarray(df)
 	if VISUALISE:
 		visualise(df)
