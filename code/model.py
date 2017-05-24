@@ -1,7 +1,7 @@
 import cv2
 import tensorflow as tf
 import tensorflow.contrib.slim as slim
-from nets import resnet_v1
+from tensorflow.contrib.slim.nets import resnet_v1
 import numpy as np
 
 class Model(object):
