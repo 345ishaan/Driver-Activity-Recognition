@@ -9,7 +9,7 @@ from pdb import set_trace as brk
 
 class Model(object):
 
-	def __init__(self,sess,batch_size,num_epochs,tf_record_file_path,load_model,model_save_path,write_tensorboard_flag):
+	def __init__(self,sess,batch_size,num_epochs,tf_record_file_path,load_model,model_save_path,best_model_save_path,restore_model_path,write_tensorboard_flag):
 
 		self.batch_size = batch_size
 		self.num_epochs = num_epochs
@@ -25,6 +25,9 @@ class Model(object):
 		self.images, self.labels = self.load_from_tfRecord(self.filename_queue)
 		
 		self.model_save_path = model_save_path
+		self.best_model_save_path = best_model_save_path
+		self.restore_model_path = restore_model_path
+
 		self.load_model =  load_model
 		self.save_after_steps = 200
 		self.print_after_steps = 50
@@ -40,6 +43,7 @@ class Model(object):
 		self.X = tf.placeholder(tf.float32,shape=(self.batch_size,self.img_height,self.img_width,self.channels),name='input')
 		self.Y = tf.placeholder(tf.int32,shape=(self.batch_size),name='labels')
 		self.keep_prob = tf.placeholder(tf.float32,shape=[],name='dropout_prob')
+
 		# with slim.arg_scope(resnet_v1.resnet_arg_scope(is_training=True)):
 		# 	self.net, self.end_points = resnet_v1.resnet_v1_50(self.X)
 		# self.fc_classification = slim.fully_connected(self.net,512,scope='fc_classification')
@@ -52,10 +56,10 @@ class Model(object):
 			labels=tf.one_hot(self.Y,self.num_classes),
 			logits=self.net))
 		
-		self.minimize_loss = tf.train.AdamOptimizer().minimize(self.cross_entropy_loss)
-
+		self.minimize_loss = tf.train.AdamOptimizer().minimize(self.cross_entropy_loss,var_list=[p for p in tf.trainable_variables() if (('fc7' in p.name) or ('classification' in p.name))])
+		self.accuracy = tf.reduce_mean(tf.cast(tf.equal(tf.cast(tf.argmax(self.net,1),tf.int32),self.Y),tf.float32))
 		self.saver = tf.train.Saver(max_to_keep=4,keep_checkpoint_every_n_hours=2)
-
+		self.best_saver = tf.train.Saver(max_to_keep=10)
 		
 		return self.cross_entropy_loss
 
@@ -133,18 +137,22 @@ class Model(object):
 				
 				
 				if self.write_tensorboard_flag:
-					__,batch_loss,total_summ = self.sess.run([self.minimize_loss,self.cross_entropy_loss,self.merge_summ],{self.X:batch_imgs,self.Y:batch_labels,self.keep_prob:0.5})
+					__,batch_loss,total_summ,accuracy = self.sess.run([self.minimize_loss,self.cross_entropy_loss,self.merge_summ,self.accuracy],{self.X:batch_imgs,self.Y:batch_labels,self.keep_prob:0.5})
+					
 					self.writer.add_summary(total_summ)
 				else:
 					__,batch_loss = self.sess.run([self.minimize_loss,self.cross_entropy_loss],{self.X:batch_imgs,self.Y:batch_labels,self.keep_prob:0.5})
 					
 
-				if (counter%self.save_after_steps == 0 or batch_loss <= best_loss):
-					best_loss = batch_loss
+				if (counter%self.save_after_steps == 0):
 					self.saver.save(self.sess,self.model_save_path+'statefarm_model',global_step=int(counter),write_meta_graph=False)
 				
+				if batch_loss <= best_loss:
+					best_loss = batch_loss
+					self.best_saver.save(self.sess,self.best_model_save_path+'statefarm_best_model',global_step=int(counter),write_meta_graph=False)
+					
 				if counter%self.print_after_steps == 0:
-					print "Iteration:{},Loss:{}".format(counter,batch_loss)
+					print "Iteration:{},Loss:{},Accuracy:{}".format(counter,batch_loss,accuracy)
 				counter += 1
 		except tf.errors.OutOfRangeError:
 			print('Done training -- epoch limit reached')
@@ -189,7 +197,8 @@ class Model(object):
 		keys = sorted(weights.keys())
 		print 'Loading VGG16 weights...'
 		for var, k in zip(variables, keys):
-			if 'conv' in k:
+			if 'fc8' not in k:
+				
 				self.sess.run(var.assign(weights[k]))
 
 	def print_variables(self):
