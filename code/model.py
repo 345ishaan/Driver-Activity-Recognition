@@ -52,7 +52,7 @@ class Model(object):
 			labels=tf.one_hot(self.Y,self.num_classes),
 			logits=self.net))
 		
-		self.minimize_loss = tf.train.AdamOptimizer(learning_rate=0.1).minimize(self.cross_entropy_loss)
+		self.minimize_loss = tf.train.AdamOptimizer().minimize(self.cross_entropy_loss)
 
 		self.saver = tf.train.Saver(max_to_keep=4,keep_checkpoint_every_n_hours=2)
 
@@ -64,7 +64,7 @@ class Model(object):
 		with tf.variable_scope('vgg_16'):
 			with slim.arg_scope([slim.conv2d, slim.fully_connected],
 								 activation_fn = tf.nn.relu,
-								 weights_initializer = tf.constant_initializer(0.0)):
+								 weights_initializer = tf.truncated_normal_initializer(0.0, 0.01)):
 				
 				net = slim.repeat(inputs, 2, slim.conv2d, 64, [3, 3], scope='conv1')
 				net = slim.max_pool2d(net, [2, 2], scope='pool1')
@@ -80,10 +80,11 @@ class Model(object):
 
 				net = slim.fully_connected(tf.reshape(net, [-1, shape]), 4096, scope='fc6')
 				net = slim.dropout(net,keep_prob, scope='dropout6')
-				net = slim.fully_connected(net, 1024, scope='fc7')
+				net = slim.fully_connected(net, 4096, scope='fc7')
 				net = slim.dropout(net,keep_prob, scope='dropout7')
 				net = slim.fully_connected(net,self.num_classes,scope='classification', activation_fn=None)
 		return net
+
 
 	def write_tensorboard(self):
 
@@ -124,7 +125,6 @@ class Model(object):
 		try:
 			while not coord.should_stop():
 				batch_imgs,batch_labels = self.sess.run([self.images,self.labels])
-				
 				mean_pixel = [103.939, 116.779, 123.68]
 
 				batch_imgs[:,:,:,0] -= mean_pixel[0]
