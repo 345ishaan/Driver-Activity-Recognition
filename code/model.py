@@ -137,12 +137,13 @@ class Model(object):
 				
 				
 				if self.write_tensorboard_flag:
-					__,batch_loss,total_summ,accuracy = self.sess.run([self.minimize_loss,self.cross_entropy_loss,self.merge_summ,self.accuracy],{self.X:batch_imgs,self.Y:batch_labels,self.keep_prob:0.5})
+					__,batch_loss,total_summ = self.sess.run([self.minimize_loss,self.cross_entropy_loss,self.merge_summ],{self.X:batch_imgs,self.Y:batch_labels,self.keep_prob:0.5})
 					
 					self.writer.add_summary(total_summ)
 				else:
 					__,batch_loss = self.sess.run([self.minimize_loss,self.cross_entropy_loss],{self.X:batch_imgs,self.Y:batch_labels,self.keep_prob:0.5})
 					
+				accuracy = self.sess.run(self.accuracy, feed_dict={self.X:batch_imgs,self.Y:batch_labels,self.keep_prob:1.0})
 
 				if (counter%self.save_after_steps == 0):
 					self.saver.save(self.sess,self.model_save_path+'statefarm_model',global_step=int(counter),write_meta_graph=False)
