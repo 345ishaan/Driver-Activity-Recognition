@@ -9,7 +9,7 @@ from pdb import set_trace as brk
 
 class Model(object):
 
-	def __init__(self,sess,batch_size,num_epochs,tf_record_file_path,load_model,model_save_path,best_model_save_path,restore_model_path,write_tensorboard_flag):
+	def __init__(self,sess,batch_size,num_epochs,tf_val_record_file_path,tf_train_record_file_path,load_model,model_save_path,best_model_save_path,restore_model_path,write_tensorboard_flag):
 
 		self.batch_size = batch_size
 		self.num_epochs = num_epochs
@@ -20,9 +20,10 @@ class Model(object):
 
 		self.num_classes = 10
 
-		self.tf_record_file_path = tf_record_file_path
-		self.filename_queue = tf.train.string_input_producer([self.tf_record_file_path], num_epochs=self.num_epochs)
-		self.images, self.labels = self.load_from_tfRecord(self.filename_queue)
+		self.tf_train_record_file_path = tf_train_record_file_path
+		self.tf_val_record_file_path = tf_val_record_file_path
+
+		
 		
 		self.model_save_path = model_save_path
 		self.best_model_save_path = best_model_save_path
@@ -31,6 +32,11 @@ class Model(object):
 		self.load_model =  load_model
 		self.save_after_steps = 200
 		self.print_after_steps = 50
+		self.perform_val_after_steps = 100
+
+		self.train_data_size = 19714
+		self.val_data_size = 2710
+		self.it_per_epoch = self.train_data_size/float(self.batch_size)
 
 		self.write_tensorboard_flag = write_tensorboard_flag
 
@@ -39,7 +45,15 @@ class Model(object):
 	def build_network(self):
 
 		print "Building Network"
-		
+		with tf.variable_scope('train_data_queue'):
+			filename_train_queue = tf.train.string_input_producer([self.tf_train_record_file_path], num_epochs=self.num_epochs)
+			self.train_images, self.train_labels = self.load_from_tfRecord(filename_train_queue)
+		with tf.variable_scope('val_data_queue'):
+			filename_val_queue = tf.train.string_input_producer([self.tf_val_record_file_path], 
+				num_epochs=self.num_epochs*(int(self.it_per_epoch/self.perform_val_after_steps)+1))
+			self.val_images, self.val_labels = self.load_from_tfRecord(filename_val_queue)
+
+
 		self.X = tf.placeholder(tf.float32,shape=(self.batch_size,self.img_height,self.img_width,self.channels),name='input')
 		self.Y = tf.placeholder(tf.int32,shape=(self.batch_size),name='labels')
 		self.keep_prob = tf.placeholder(tf.float32,shape=[],name='dropout_prob')
@@ -94,8 +108,8 @@ class Model(object):
 
 		self.writer = tf.summary.FileWriter('../logs', self.sess.graph)
 		loss_summ = tf.summary.scalar('loss', self.cross_entropy_loss)
-		img_summ = tf.summary.image('images', self.images,max_outputs=5)
-		label_summ = tf.summary.histogram('labels', self.labels)
+		img_summ = tf.summary.image('images', self.train_images,max_outputs=5)
+		label_summ = tf.summary.histogram('labels', self.train_labels)
 		self.merge_summ = tf.summary.merge([loss_summ,img_summ,label_summ])
 		self.writer.flush()
 
@@ -124,11 +138,11 @@ class Model(object):
 		threads = tf.train.start_queue_runners(sess=self.sess,coord=coord)
 
 		counter = 0
-		best_loss = sys.maxint
+		best_val_acc = -sys.maxint
 
 		try:
 			while not coord.should_stop():
-				batch_imgs,batch_labels = self.sess.run([self.images,self.labels])
+				batch_imgs,batch_labels = self.sess.run([self.train_images,self.train_labels])
 				mean_pixel = [103.939, 116.779, 123.68]
 
 				batch_imgs[:,:,:,0] -= mean_pixel[0]
@@ -144,17 +158,33 @@ class Model(object):
 					__,batch_loss = self.sess.run([self.minimize_loss,self.cross_entropy_loss],{self.X:batch_imgs,self.Y:batch_labels,self.keep_prob:0.5})
 					
 				accuracy = self.sess.run(self.accuracy, feed_dict={self.X:batch_imgs,self.Y:batch_labels,self.keep_prob:1.0})
+				
+				if counter%self.print_after_steps == 0:
+					print "Iteration:{},Loss:{},Training Accuracy:{}".format(counter,batch_loss,accuracy)
+				
 
 				if (counter%self.save_after_steps == 0):
 					self.saver.save(self.sess,self.model_save_path+'statefarm_model',global_step=int(counter),write_meta_graph=False)
 				
-				if batch_loss <= best_loss:
-					best_loss = batch_loss
-					self.best_saver.save(self.sess,self.best_model_save_path+'statefarm_best_model',global_step=int(counter),write_meta_graph=False)
+				if (counter%self.perform_val_after_steps == 0):
+					val_acc = 0.0
+					total_val = 0.0
+					for it in range(self.val_data_size/self.batch_size):
+						batch_val_images,batch_val_labels = self.sess.run([self.val_images,self.val_labels])
+						
+						accuracy = self.sess.run(self.accuracy, feed_dict={self.X:batch_val_images,self.Y:batch_val_labels,self.keep_prob:1.0})
+						val_acc += accuracy *(batch_val_images.shape[0])
+						total_val += batch_val_images.shape[0]
+					val_acc = val_acc/total_val
+
+					print "************Validation Accuracy:{}************".format(val_acc)
 					
-				if counter%self.print_after_steps == 0:
-					print "Iteration:{},Loss:{},Accuracy:{}".format(counter,batch_loss,accuracy)
+					if val_acc >= best_val_acc:
+						best_val_acc = val_acc
+						self.best_saver.save(self.sess,self.best_model_save_path+'statefarm_best_model',global_step=int(counter),write_meta_graph=False)
+					
 				counter += 1
+				
 		except tf.errors.OutOfRangeError:
 			print('Done training -- epoch limit reached')
 		finally:
