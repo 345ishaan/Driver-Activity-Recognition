@@ -189,8 +189,8 @@ class Model(object):
 
 		self.writer = tf.summary.FileWriter('../logs', self.sess.graph)
 		loss_summ = tf.summary.scalar('loss', self.cross_entropy_loss)
-		img_summ = tf.summary.image('images', self.train_images,max_outputs=5)
-		label_summ = tf.summary.histogram('labels', self.train_labels)
+		img_summ = tf.summary.image('images', self.X,max_outputs=5)
+		label_summ = tf.summary.histogram('labels', self.Y)
 		self.merge_summ = tf.summary.merge([loss_summ,img_summ,label_summ])
 		self.writer.flush()
 
