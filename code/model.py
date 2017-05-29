@@ -1,8 +1,9 @@
 import os
 import sys
+import scipy.io
 import tensorflow as tf
 import tensorflow.contrib.slim as slim
-#from tensorflow.contrib.slim.nets import resnet_v1
+from tensorflow.contrib.slim.nets import resnet_v1
 # from tensorflow.contrib.slim.nets import vgg
 import numpy as np
 from pdb import set_trace as brk
@@ -23,7 +24,9 @@ class Model(object):
 		self.tf_train_record_file_path = tf_train_record_file_path
 		self.tf_val_record_file_path = tf_val_record_file_path
 
-		
+		self.use_vgg = False
+		self.use_resnet = False
+		self.use_squeezenet = True
 		
 		self.model_save_path = model_save_path
 		self.best_model_save_path = best_model_save_path
@@ -58,19 +61,25 @@ class Model(object):
 		self.Y = tf.placeholder(tf.int32,shape=(self.batch_size),name='labels')
 		self.keep_prob = tf.placeholder(tf.float32,shape=[],name='dropout_prob')
 
-		# with slim.arg_scope(resnet_v1.resnet_arg_scope(is_training=True)):
-		# 	self.net, self.end_points = resnet_v1.resnet_v1_50(self.X)
-		# self.fc_classification = slim.fully_connected(self.net,512,scope='fc_classification')
-		# self.out_classification = slim.fully_connected(self.fc_classification,self.num_classes,scope='out_classification')
-		# self.out_classification,__ = vgg.vgg_16(self.X,num_classes=10,spatial_squeeze=False)
-		self.net = self.VGG16(self.X,self.keep_prob)
-		
-
+		if self.use_vgg:
+			self.net = self.VGG16(self.X,self.keep_prob)
+			
+		if self.use_resnet:
+			self.net = self.resnet_50(self.X,self.keep_prob)
+			self.net = tf.squeeze(self.net,axis=[1,2])
+		if self.use_squeezenet:
+			self.net = self.squeezenet(self.X,self.keep_prob)
+			self.net = slim.conv2d(self.net, self.num_classes, [1,1], 1, scope='out_classification')
+			self.net = slim.avg_pool2d(self.net,[self.net.get_shape()[1],self.net.get_shape()[2]],stride=[1,1])
+			self.net = tf.squeeze(self.net,axis=[1,2])
+			
 		self.cross_entropy_loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(
 			labels=tf.one_hot(self.Y,self.num_classes),
 			logits=self.net))
 		
-		self.minimize_loss = tf.train.AdamOptimizer().minimize(self.cross_entropy_loss,var_list=[p for p in tf.trainable_variables() if (('fc7' in p.name) or ('classification' in p.name))])
+		self.minimize_loss = tf.train.AdamOptimizer().minimize(self.cross_entropy_loss,var_list=[p for p in tf.trainable_variables() 
+			if (('fc_classification' in p.name) or ('out_classification' in p.name))])
+		
 		self.accuracy = tf.reduce_mean(tf.cast(tf.equal(tf.cast(tf.argmax(self.net,1),tf.int32),self.Y),tf.float32))
 		self.saver = tf.train.Saver(max_to_keep=4,keep_checkpoint_every_n_hours=2)
 		self.best_saver = tf.train.Saver(max_to_keep=10)
@@ -98,10 +107,82 @@ class Model(object):
 
 				net = slim.fully_connected(tf.reshape(net, [-1, shape]), 4096, scope='fc6')
 				net = slim.dropout(net,keep_prob, scope='dropout6')
-				net = slim.fully_connected(net, 4096, scope='fc7')
-				net = slim.dropout(net,keep_prob, scope='dropout7')
-				net = slim.fully_connected(net,self.num_classes,scope='classification', activation_fn=None)
+				net = slim.fully_connected(net, 4096, scope='fc_classification')
+				net = slim.dropout(net,keep_prob, scope='dropout_fc_classification')
+				net = slim.fully_connected(net,self.num_classes,scope='out_classification', activation_fn=None)
 		return net
+
+	def resnet_50(self,inputs,keep_prob):
+
+		with slim.arg_scope(resnet_v1.resnet_arg_scope(is_training=True)):
+			net, end_points = resnet_v1.resnet_v1_50(inputs)
+
+		net = slim.dropout(net,keep_prob, scope='net')
+		fc_classification = slim.fully_connected(net,2048,scope='fc_classification')
+		fc_classification = slim.dropout(fc_classification,keep_prob, scope='dropout_fc_classification')
+		out_classification = slim.fully_connected(fc_classification,self.num_classes,scope='out_classification',activation_fn=None)
+
+		return out_classification
+
+	
+	def squeezenet(self, inputs,keep_prob):
+
+		with tf.variable_scope('squeeze_net'):	
+			with slim.arg_scope([slim.conv2d], activation_fn = tf.nn.relu,
+									padding = 'SAME',
+									weights_initializer = tf.truncated_normal_initializer(0.0, 0.01)):
+
+				conv1 = slim.conv2d(inputs, 64, [3,3], 2, padding = 'VALID', scope='conv1')
+				pool1 = slim.max_pool2d(conv1, [2,2], 2, scope='pool1')
+				fire2 = self.fire_module(pool1, 16, 64, scope = 'fire2')
+				fire3 = self.fire_module(fire2, 16, 64, scope = 'fire3', res_connection=True)
+				fire4 = self.fire_module(fire3, 32, 128, scope = 'fire4')
+				pool4 = slim.max_pool2d(fire4, [2,2], 2, scope='pool4')
+				fire5 = self.fire_module(pool4, 32, 128, scope = 'fire5', res_connection=True)
+				fire6 = self.fire_module(fire5, 48, 192, scope = 'fire6')
+				fire7 = self.fire_module(fire6, 48, 192, scope = 'fire7', res_connection=True)
+				fire8 = self.fire_module(fire7, 64, 256, scope = 'fire8')
+				pool8 = slim.max_pool2d(fire8, [2,2], 2, scope='pool8')
+				fire9 = self.fire_module(pool8, 64, 256, scope = 'fire9', res_connection=True)
+				
+				
+		return fire9
+
+	def fire_module(self, inputs, s_channels, e_channels, scope, res_connection = False):
+		
+		with tf.variable_scope(scope):
+			sq = self.squeeze(inputs, s_channels, 'squeeze')
+			ex = self.expand(sq, e_channels, 'expand')
+			if res_connection:
+				ret = tf.nn.relu(tf.add(inputs,ex))
+			else:
+				ret = tf.nn.relu(ex)
+		
+		return ret
+
+
+	def squeeze(self, inputs, channels, scope):
+		
+		with slim.arg_scope([slim.conv2d], activation_fn = None,
+							padding = 'SAME',
+							weights_initializer = tf.truncated_normal_initializer(0.0, 0.01)):
+			with tf.variable_scope(scope):
+				sq = slim.conv2d(inputs, channels, [1,1], 1, scope = '1x1')
+		
+		return sq
+
+	def expand(self, inputs, channels, scope):
+		
+		with slim.arg_scope([slim.conv2d], activation_fn = None,
+							padding = 'SAME',
+							weights_initializer = tf.truncated_normal_initializer(0.0, 0.01)):
+			with tf.variable_scope(scope):
+				e1x1 = slim.conv2d(inputs, channels, [1,1], 1, scope='1x1')
+				e3x3 = slim.conv2d(inputs, channels, [3,3], 1, scope='3x3')
+				expand = tf.concat([e1x1, e3x3],3)
+		
+		return expand
+
 
 
 	def write_tensorboard(self):
@@ -125,14 +206,17 @@ class Model(object):
 			ckpt = tf.train.get_checkpoint_state(self.model_save_path)
 			if ckpt and ckpt.model_checkpoint_path:
 				self.saver.restore(self.sess,ckpt.model_checkpoint_path)
+				self.sess.run(tf.local_variables_initializer())
 		else:
 			print "Initializing Model"
 			self.sess.run(tf.group(tf.global_variables_initializer(),tf.local_variables_initializer()))
-			
-
-		#tf.contrib.framework.assign_from_checkpoint_fn('../weights/resnet_v1_50.ckpt',slim.get_model_variables('resnet_v1_50'))(self.sess)
+			if self.use_vgg:
+				self.load_VGG16(path='../weights/vgg16_weights.npz')
+			if self.use_resnet:
+				tf.contrib.framework.assign_from_checkpoint_fn('../weights/resnet_v1_50.ckpt',slim.get_model_variables('resnet_v1_50'))(self.sess)
+			if self.use_squeezenet:
+				self.load_squeezenet(path='../weights/sqz_full.mat')
 		
-		self.load_VGG16(path='../weights/vgg16_weights.npz')
 
 		coord = tf.train.Coordinator()
 		threads = tf.train.start_queue_runners(sess=self.sess,coord=coord)
@@ -229,12 +313,30 @@ class Model(object):
 		print 'Loading VGG16 weights...'
 		for var, k in zip(variables, keys):
 			if 'fc8' not in k:
-				
 				self.sess.run(var.assign(weights[k]))
+
+	def load_squeezenet(self,path=None):
+
+		weights = scipy.io.loadmat(path)
+		params = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope='squeeze_net')
+		
+		for param in params:
+			print param.name
+			splits = param.name.split('/')
+			if 'fire' in splits[1]:
+				name = splits[1]+'/'+splits[2]+splits[3]
+			elif 'conv' in splits[1]:
+				name = splits[1]
+
+			if splits[-1].find('weights') != -1:
+				self.sess.run(param.assign(weights[name][0,0]))
+				
+			if splits[-1].find('biases') != -1:
+				self.sess.run(param.assign(weights[name][0,1][0]))
 
 	def print_variables(self):
 
 		params = tf.trainable_variables()#slim.get_model_variables()#tf.all_variables()
 		for param in params:
-			print '{} {}'.format(param.name,param.get_shape())
-			
+			print param.name, ' ', param.get_shape()
+							
