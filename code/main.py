@@ -16,7 +16,7 @@ def parse_args():
 	parser.add_argument('-m1','--model_path',dest='model_save_path',help='Checkpoint Location',default=None,type=str)
 	parser.add_argument('-m2','--best_model_path',dest='best_model_path',help='Best Checkpoint Location',default=None,type=str)
 	parser.add_argument('-m3','--restore_model_path',dest='restore_model_path',help='Restore Checkpoint Location',default=None,type=str)
-	parser.add_argument('-t','--write_tensorboard',dest='write_tensorboard_flag',help='Flag for writing in tensorboad',default=False,type=bool)
+	parser.add_argument('-t','--write_tensorboard',dest='write_tensorboard_flag',help='Flag for writing in tensorboad',default=True,type=bool)
 	args = parser.parse_args()
 	return args
 
@@ -43,7 +43,7 @@ if __name__ == '__main__':
 			net.write_tensorboard()
 		
 		if not args.forward_only:
-			net.fit()
+			net.fit_aug()
 		else:
 			net.predict()
 
