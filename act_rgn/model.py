@@ -8,14 +8,13 @@ from ops import *
 from ipdb import set_trace as brk
 import shutil
 
-
 class AttnModel(object):
 
 	def __init__(self,sess,args):
 
 		self.sess = sess
 
-		self.spatial_feature_dim = args.spatial_feature_dim
+		self.num_spatial_locations = args.spatial_feature_dim
 		self.spatial_feature_depth = args.spatial_feature_depth
 
 		
@@ -56,12 +55,27 @@ class AttnModel(object):
 
 		print 'Building Recurrent Model....'
 
-		self.conv_2_rnn_ip = tf.placeholder(tf.float32,shape=(self.batch_size,self.spatial_feature_dim,
-			self.spatial_feature_dim,self.spatial_feature_depth,self.max_time_steps))
+		self.conv_2_rnn_ip = tf.placeholder(tf.float32,shape=(self.max_time_steps,self.batch_size,self.num_spatial_locations,self.spatial_feature_depth))
 		self.labels = tf.placeholder(tf.int32,shape=(self.batch_size,self.max_time_steps))
 
-		# with tf.variable_scope('attn_states') as scope:
-		# 	self.attn_states = tf.get_variable(name='attn',shape=(self.batch_size,self.attn_))
+		mean_ip = tf.reduce_sum(tf.reduce_sum(self.conv_2_rnn_ip,0),1)
+		
+		with tf.variable_scope('init_scheme') as scope:
+			self.mean_to_space_w = tf.get_variable(name='m_to_s_w',shape=(self.spatial_feature_depth,self.spatial_feature_depth),dtype=tf.float32)
+			self.mean_to_space_b = tf.get_variable(name='m_to_s_b',shape=(self.spatial_feature_depth),dtype=tf.float32)
+			
+			self.init_memory_w = tf.get_variable(name='m_w',shape=(self.spatial_feature_depth,self.lstm_hidden_dim),dtype=tf.float32)
+			self.init_memory_b = tf.get_variable(name='m_b',shape=(self.lstm_hidden_dim),dtype=tf.float32)
+			
+			self.init_output_w = tf.get_variable(name='o_w',shape=(self.spatial_feature_depth,self.lstm_hidden_dim),dtype=tf.float32)
+			self.init_output_b = tf.get_variable(name='o_b',shape=(self.lstm_hidden_dim),dtype=tf.float32)
+
+
+		self.mean_ip = tf.matmul(mean_ip,self.mean_to_space_w) + self.mean_to_space_b
+		self.attn_init_output = tf.matmul(self.mean_ip,self.init_output_w) + self.init_output_b
+
+
+		
 		cells=[]
 
 		for i in range(self.num_layers):
@@ -72,9 +86,11 @@ class AttnModel(object):
 
 		self.initial_state = self.cell.zero_state(self.batch_size,tf.float32) # Gives the initial state of the cell and output for all layers
 
-		decoder_inputs = map(lambda x:tf.squeeze(x),tf.split(self.conv_2_rnn_ip, self.max_time_steps,axis=4))
 		
-		outputs,state = actrgn_rnn_decoder(decoder_inputs, self.initial_state, self.cell,self.attn_dim,self.lstm_hidden_dim)
+
+		decoder_inputs = map(lambda x:tf.squeeze(x),tf.split(self.conv_2_rnn_ip, self.max_time_steps,axis=0))
+		
+		outputs,state = actrgn_rnn_decoder(decoder_inputs, self.initial_state, self.attn_init_output,self.cell,self.attn_dim,self.lstm_hidden_dim)
 
 
 

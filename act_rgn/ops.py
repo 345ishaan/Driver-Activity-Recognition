@@ -6,7 +6,7 @@ from tensorflow.python.ops import nn_ops
 from ipdb import set_trace as brk
 
 def actrgn_rnn_decoder(decoder_inputs,
-                initial_state,
+                initial_state,initial_attn_output,
                 cell,attn_dim,lstm_dim,
                 loop_function=None,
                 scope=None):
@@ -37,28 +37,39 @@ def actrgn_rnn_decoder(decoder_inputs,
   """
   with variable_scope.variable_scope(scope or "actrgn_rnn_decoder"):
     state = initial_state
+    output = initial_attn_output
+    
     outputs = []
     prev = None
+    w_l = variable_scope.get_variable(name='lstm_to_attn_w',shape=[lstm_dim,attn_dim],dtype=tf.float32)
+    b_l = variable_scope.get_variable(name='lstm_to_attn_b',shape=[attn_dim],dtype=tf.float32)
+    w_i = variable_scope.get_variable(name='ip_to_attn_w',shape=[attn_dim,attn_dim],dtype=tf.float32)
+    b_i = variable_scope.get_variable(name='ip_to_attn_b',shape=[attn_dim],dtype=tf.float32)
+    w_f = variable_scope.get_variable(name='attn_to_prob_w',shape=[attn_dim,1],dtype=tf.float32)
+    b_f = variable_scope.get_variable(name='attn_to_prob_b',shape=[1],dtype=tf.float32)
 
-    attn_W1 = variable_scope.get_variable(name='attn_1',shape=[lstm_dim,attn_dim],dtype=tf.float32)
-    attn_b1 = variable_scope.get_variable(name='attn_2',shape=[attn_dim],dtype=tf.float32)
-
-    attn_W2 = variable_scope.get_variable(name='attn_3',shape=[attn_dim,attn_dim],dtype=tf.float32)
-    attn_b2 = variable_scope.get_variable(name='attn_4',shape=[attn_dim],dtype=tf.float32)
-    
-    attn_map = variable_scope.get_variable("attn_map",[14, 14,1024,1024])
-    
 
     for i, inp in enumerate(decoder_inputs):
+
       if loop_function is not None and prev is not None:
         with variable_scope.variable_scope("loop_function", reuse=True):
           inp = loop_function(prev, i)
       if i > 0:
         variable_scope.get_variable_scope().reuse_variables()
       
-      inp = tf.squeeze(nn_ops.conv2d(inp, attn_map, [1, 1, 1, 1], "VALID"))
+      attn_state = tf.matmul(output,w_l) + b_l
       
-      output, state = cell(inp, state)
+      context_state = tf.matmul(inp,tf.tile(tf.expand_dims(w_i,0),[int(inp.shape[0]),1,1])) + b_i
+      
+      context_state = context_state + tf.expand_dims(attn_state,1)
+      context_state = tf.tanh(context_state)
+
+      attn_prob = tf.squeeze(tf.nn.softmax(tf.matmul(context_state,tf.tile(tf.expand_dims(w_f,0),[int(context_state.shape[0]),1,1])) + b_f))
+
+      inp_rnn = tf.reduce_sum(tf.multiply(inp,tf.expand_dims(attn_prob,2)),1)
+
+      output, state = cell(inp_rnn, state)
+
       outputs.append(output)
       if loop_function is not None:
         prev = output
