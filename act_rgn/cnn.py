@@ -28,12 +28,14 @@ def VGG_CAM(input,reuse_flag=False):
 		return net
 
 
-def inception_v4(inputs,reuse_flag=False):
+def inception_v2(inputs,reuse_flag=False):
 
-	with slim.arg_scope(inception.inception_v3_arg_scope()):
-			net, end_points = inception.inception_v3(inputs)
+	with slim.arg_scope(inception.inception_v2_arg_scope()):
+			net, end_points = inception.inception_v2(inputs)
+			print end_points
+	return net,end_points['Mixed_5c']
 
-	return net,end_points['Mixed_7c']
+
 
 
 
