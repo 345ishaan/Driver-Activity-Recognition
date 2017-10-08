@@ -1,4 +1,6 @@
-# State_Farm
+# Driver Activity Recognition
+
+Dataset: https://www.kaggle.com/c/state-farm-distracted-driver-detection
 
 Activity Recognition for ADAS
 
